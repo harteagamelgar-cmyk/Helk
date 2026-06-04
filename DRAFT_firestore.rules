@@ -1,0 +1,137 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Core Primitives
+    // ---------------------------------------------------------
+    function isSignedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    function isAdmin() { return false; } // App has no admin role
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // ---------------------------------------------------------
+    // Type Validations
+    // ---------------------------------------------------------
+    function isStr(val, min, max) { return val is string && val.size() >= min && val.size() <= max; }
+    function isOptStr(val, max) { return val == null || isStr(val, 0, max); }
+    function isNum(val) { return val is number; }
+
+    // ---------------------------------------------------------
+    // Entity Validations (Blueprint)
+    // ---------------------------------------------------------
+    
+    // RPConfig validation block
+    function isValidRPConfig(config) {
+      return config == null || (
+        config is map &&
+        config.keys().hasAll(['scenario', 'userCharacters', 'aiCharacters']) && 
+        config.keys().size() == 3 &&
+        isStr(config.scenario, 0, 5000) &&
+        isStr(config.userCharacters, 0, 5000) &&
+        isStr(config.aiCharacters, 0, 5000)
+      );
+    }
+
+    function isValidChatSession(data) {
+      return isStr(data.id, 1, 128) &&
+             isStr(data.title, 0, 200) &&
+             isStr(data.userId, 1, 128) &&
+             data.userId == request.auth.uid &&
+             isNum(data.updatedAt) &&
+             isNum(data.createdAt) &&
+             isOptStr(data.notes, 10000) &&
+             isOptStr(data.tone, 50) &&
+             isValidRPConfig(data.get('rpConfig', null));
+    }
+
+    function isValidMessage(data) {
+      return isStr(data.id, 1, 128) &&
+             isStr(data.role, 1, 50) &&
+             (data.role == 'user' || data.role == 'model') &&
+             isStr(data.text, 0, 50000) &&
+             isOptStr(data.modelType, 50) &&
+             (data.get('isPinned', false) is bool || data.get('isPinned', null) == null) &&
+             isOptStr(data.imageUrl, 2000) &&
+             isNum(data.createdAt);
+    }
+
+    // ---------------------------------------------------------
+    // Data Paths
+    // ---------------------------------------------------------
+    
+    match /users/{userId}/sessions/{sessionId} {
+      allow get: if isSignedIn() && userId == request.auth.uid;
+      allow list: if isSignedIn() && userId == request.auth.uid && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(sessionId) &&
+                       userId == request.auth.uid &&
+                       incoming().keys().hasAll(['id', 'title', 'userId', 'updatedAt', 'createdAt']) &&
+                       // notes, tone, rpConfig are optional but size checked via helper
+                       isValidChatSession(incoming()) &&
+                       incoming().createdAt == request.time.toMillis() &&
+                       incoming().updatedAt == request.time.toMillis();
+                       
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(sessionId) &&
+                       userId == request.auth.uid &&
+                       existing().userId == request.auth.uid &&
+                       isValidChatSession(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt == request.time.toMillis() &&
+                       (
+                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'updatedAt', 'notes', 'tone', 'rpConfig'])
+                       );
+                       
+      allow delete: if isSignedIn() && userId == request.auth.uid && existing().userId == request.auth.uid;
+      
+      // Messages Subcollection
+      match /messages/{messageId} {
+        // Relational check: Must be owner of the session to interact with messages
+        function isSessionOwner() {
+          return get(/databases/$(database)/documents/users/$(userId)/sessions/$(sessionId)).data.userId == request.auth.uid;
+        }
+
+        allow get: if isSignedIn() && userId == request.auth.uid && isSessionOwner();
+        allow list: if isSignedIn() && userId == request.auth.uid && isSessionOwner();
+        
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(sessionId) &&
+                         isValidId(messageId) &&
+                         userId == request.auth.uid &&
+                         isSessionOwner() &&
+                         incoming().keys().hasAll(['id', 'role', 'text', 'createdAt']) &&
+                         isValidMessage(incoming()) &&
+                         incoming().createdAt == request.time.toMillis();
+                         
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(sessionId) &&
+                         isValidId(messageId) &&
+                         userId == request.auth.uid &&
+                         isSessionOwner() &&
+                         isValidMessage(incoming()) &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['text', 'isPinned'])
+                         );
+                         
+        allow delete: if isSignedIn() && userId == request.auth.uid && isSessionOwner();
+      }
+    }
+  }
+}

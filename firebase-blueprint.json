@@ -1,0 +1,52 @@
+{
+  "entities": {
+    "Message": {
+      "title": "Message",
+      "description": "Represents a single message in a chat session.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the message" },
+        "role": { "type": "string", "enum": ["user", "model"] },
+        "text": { "type": "string" },
+        "modelType": { "type": "string", "enum": ["rapid", "prime"] },
+        "isPinned": { "type": "boolean" },
+        "imageUrl": { "type": "string" },
+        "createdAt": { "type": "timestamp", "description": "Timestamp of creation" }
+      },
+      "required": ["id", "role", "text", "createdAt"]
+    },
+    "ChatSession": {
+      "title": "Chat Session",
+      "description": "Represents an umbrella chat session containing messages.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "userId": { "type": "string", "description": "Owner of the chat session" },
+        "updatedAt": { "type": "timestamp" },
+        "createdAt": { "type": "timestamp" },
+        "notes": { "type": "string" },
+        "tone": { "type": "string" },
+        "rpConfig": {
+          "type": "object",
+          "properties": {
+            "scenario": { "type": "string" },
+            "userCharacters": { "type": "string" },
+            "aiCharacters": { "type": "string" }
+          }
+        }
+      },
+      "required": ["id", "title", "userId", "updatedAt", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/sessions": {
+      "schema": { "$ref": "#/entities/ChatSession" },
+      "description": "A user's chat sessions."
+    },
+    "/users/{userId}/sessions/{sessionId}/messages": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Messages within a session."
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Helk - AI Writing Assistant",
+  "description": "An AI writing assistant that helps fix plot holes, inconsistencies, and remembers your story's lore.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
